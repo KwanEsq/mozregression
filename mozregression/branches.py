@@ -9,6 +9,7 @@ from collections import defaultdict
 from mozlog import get_proxy_logger
 
 from mozregression.errors import MozRegressionError
+from mozregression.network import retry_get
 import six
 
 LOG = get_proxy_logger('Branches')
@@ -55,6 +56,10 @@ class Branches(object):
 
 
 def create_branches():
+    VERSIONS_URL = (
+        "https://product-details.mozilla.org/1.0/firefox_versions.json"
+    )
+
     branches = Branches()
 
     branches.set_branch("mozilla-central", "mozilla-central")
@@ -69,6 +74,20 @@ def create_branches():
     for name in ("comm-beta", "comm-release",
                  "mozilla-beta", "mozilla-release"):
         branches.set_branch(name, "releases/%s" % name, category='releases')
+
+    # current ESR branches
+    versions = retry_get(VERSIONS_URL)
+    if versions.status_code == 200:
+        esr = versions.json()["FIREFOX_ESR"]
+        esr_next = versions.json()["FIREFOX_ESR_NEXT"]
+        for rel in [esr, esr_next]:
+            if rel:
+                major = rel.partition(".")[0]
+                name = "mozilla-esr%s" % major
+                branches.set_branch(
+                    name, "releases/%s" % name, category="releases"
+                )
+                branches.set_alias("esr%s" % major, name)
 
     branches.set_branch('try', 'try', category='try')
 

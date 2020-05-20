@@ -11,6 +11,7 @@ import sys
 
 import colorama
 import mozfile
+import mozinfo
 import requests
 from mozlog import get_proxy_logger
 from requests.exceptions import HTTPError, RequestException
@@ -52,6 +53,7 @@ class Application(object):
         # init global profile if required
         self._global_profile = None
         if options.profile_persistence in ("clone-first", "reuse"):
+            self.check_profile_lock()
             self._global_profile = launcher_class.create_profile(
                 profile=options.profile,
                 addons=options.addons,
@@ -60,7 +62,41 @@ class Application(object):
             )
             options.cmdargs = options.cmdargs + ["--allow-downgrade"]
         elif options.profile:
+            self.check_profile_lock()
             options.cmdargs = options.cmdargs + ["--allow-downgrade"]
+
+    def check_profile_lock(self):
+        lockname = "parent.lock" if mozinfo.os == "win" else ".parentlock"
+        lockpath = os.path.join(self.options.profile, lockname)
+        if mozinfo.os == "win":
+            try:
+                l = open(lockpath, "w")
+                l.close()
+            except IOError:
+                raise MozRegressionError("Profile is already in use")
+        else:
+            import fcntl
+
+            oldlockname = "parent.lock" if mozinfo.os == "mac" else "lock"
+            with open(lockpath, "w") as fp:
+                try:
+                    fcntl.lockf(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    fcntl.lockf(fp, fcntl.LOCK_UN)
+                    oldlock = os.path.join(self.option.profile, oldlockname)
+                    if os.path.islink(oldlock):
+                        addr = os.readlink(oldlock)
+                        pid = addr.split(":")[1]
+                        if not pid.startswith("+"):
+                            try:
+                                os.kill(pid, 0)
+                                raise MozRegressionError("Profile is already in use")
+                            except OSError:
+                                pass
+                        os.remove(oldlock)
+                except IOError:
+                    raise MozRegressionError("Profile is already in use")
+        # if os.path.islink(os.path.join(self.options.profile, 'lock')):
+        #     raise MozRegressionError('Profile is already in use')
 
     def clear(self):
         if self._build_download_manager:
